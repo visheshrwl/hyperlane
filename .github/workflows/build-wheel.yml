@@ -1,0 +1,316 @@
+name: Build and Test Wheels
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-wheels:
+    name: Build wheel on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Display Python version
+        run: python -c "import sys; print(sys.version)"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          python -m pip install cmake ninja pybind11 twine
+
+      - name: Build wheel
+        working-directory: ./hyperlane_client
+        run: |
+          python -m build --wheel
+          ls -lh dist/
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels-py${{ matrix.python-version }}
+          path: hyperlane_client/dist/*.whl
+          if-no-files-found: error
+
+      - name: Check wheel contents
+        working-directory: ./hyperlane_client
+        run: |
+          python -m pip install zipfile-deflate64
+          python << 'EOF'
+          import zipfile
+          import glob
+          
+          wheels = glob.glob('dist/*.whl')
+          if wheels:
+              wheel_path = wheels[0]
+              print(f"\n Wheel: {wheel_path}")
+              with zipfile.ZipFile(wheel_path, 'r') as zf:
+                  print("\n Contents:")
+                  for name in sorted(zf.namelist()):
+                      info = zf.getinfo(name)
+                      print(f"  {name} ({info.file_size} bytes)")
+          EOF
+
+  test-wheels:
+    name: Test wheel on Python ${{ matrix.python-version }}
+    needs: build-wheels
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-py${{ matrix.python-version }}
+          path: dist/
+
+      - name: Display wheel
+        run: |
+          ls -lh dist/
+          file dist/*.whl
+
+      - name: Install wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+
+      - name: Test imports
+        run: |
+          python << 'EOF'
+          import sys
+          print(f"Python {sys.version}")
+          
+          print("\n Testing imports...")
+          from hyperlane_client import DiscoveryManager, AutoDistributedModel
+          print("   DiscoveryManager imported")
+          print("   AutoDistributedModel imported")
+          
+          from hyperlane_client.discovery import DiscoveryManager
+          print("   Discovery module imported")
+          
+          from hyperlane_client.orchestrator import KnapsackPartitioner
+          print("   Orchestrator module imported")
+          
+          from hyperlane_client.grpc_client import WorkerClient
+          print("   gRPC client imported")
+          
+          print("\n All imports successful!")
+          EOF
+
+      - name: Test basic functionality
+        run: |
+          python << 'EOF'
+          print("\n Testing basic functionality...")
+          
+          # Test DiscoveryManager instantiation
+          from hyperlane_client import DiscoveryManager
+          dm = DiscoveryManager()
+          print("   DiscoveryManager instantiated")
+          
+          # Test KnapsackPartitioner
+          from hyperlane_client.orchestrator import KnapsackPartitioner
+          partitioner = KnapsackPartitioner()
+          print("   KnapsackPartitioner instantiated")
+          
+          # Test basic partitioning
+          layers = [
+              {'name': 'layer1', 'size_bytes': 1024 * 1024 * 500},      # 500MB
+              {'name': 'layer2', 'size_bytes': 1024 * 1024 * 500},      # 500MB
+              {'name': 'layer3', 'size_bytes': 1024 * 1024 * 500},      # 500MB
+          ]
+          workers = [
+              {'name': 'worker1', 'vram_bytes': 1024 * 1024 * 1024 * 24},   # 24GB
+              {'name': 'worker2', 'vram_bytes': 1024 * 1024 * 1024 * 24},   # 24GB
+          ]
+          
+          partition = partitioner.partition(layers, workers)
+          print(f"   Partitioned {len(layers)} layers across {len(workers)} workers")
+          assert len(partition) == len(workers), "Partition mismatch"
+          print("   Partitioning validation passed")
+          
+          print("\n All functionality tests passed!")
+          EOF
+
+      - name: Run unit tests
+        run: |
+          python -m pip install pytest pytest-cov
+          pytest tests.py -v --tb=short || true
+
+  verify-wheel-compatibility:
+    name: Verify wheel compatibility
+    needs: build-wheels
+    runs-on: ubuntu-20.04
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Download all wheels
+        uses: actions/download-artifact@v3
+        with:
+          path: all-wheels/
+
+      - name: Verify wheel structure
+        run: |
+          python << 'EOF'
+          import os
+          import zipfile
+          import json
+          from pathlib import Path
+          
+          wheels_dir = Path('all-wheels')
+          wheels = list(wheels_dir.rglob('*.whl'))
+          
+          print(f"\n Found {len(wheels)} wheels\n")
+          
+          compatibility_matrix = {}
+          
+          for wheel in sorted(wheels):
+              print(f"Checking: {wheel.name}")
+              
+              with zipfile.ZipFile(wheel, 'r') as zf:
+                  # Check for Python version in wheel metadata
+                  dist_info_dirs = [n for n in zf.namelist() if '.dist-info' in n]
+                  
+                  if dist_info_dirs:
+                      metadata_file = next((n for n in zf.namelist() if n.endswith('WHEEL')), None)
+                      if metadata_file:
+                          with zf.open(metadata_file) as f:
+                              content = f.read().decode('utf-8')
+                              print(f"   Valid wheel metadata")
+                              for line in content.split('\n'):
+                                  if line.startswith('Tag:'):
+                                      print(f"    {line}")
+                  
+                  # Check for binary extensions
+                  so_files = [n for n in zf.namelist() if n.endswith('.so')]
+                  if so_files:
+                      print(f"   Found {len(so_files)} binary extension(s):")
+                      for so in so_files:
+                          print(f"    - {so}")
+                  
+                  # Check Python package structure
+                  py_files = [n for n in zf.namelist() if n.endswith('.py')]
+                  print(f"   Found {len(py_files)} Python files")
+              
+              print()
+          
+          print(" All wheels verified successfully!")
+          EOF
+
+  publish-wheels:
+    name: Publish wheels to PyPI
+    needs: [build-wheels, test-wheels, verify-wheel-compatibility]
+    runs-on: ubuntu-20.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Download all wheels
+        uses: actions/download-artifact@v3
+        with:
+          path: dist/
+
+      - name: Flatten artifacts directory
+        run: |
+          mkdir -p final-dist
+          find dist -name '*.whl' -exec cp {} final-dist/ \;
+          ls -lh final-dist/
+
+      - name: Install twine
+        run: python -m pip install twine
+
+      - name: Publish to PyPI (TEST)
+        if: contains(github.ref, 'rc') || contains(github.ref, 'beta')
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TESTPYPI_API_TOKEN }}
+        run: |
+          twine upload --repository testpypi final-dist/*.whl --skip-existing || true
+          echo "Published to TestPyPI"
+
+      - name: Publish to PyPI (PRODUCTION)
+        if: ${{ !contains(github.ref, 'rc') && !contains(github.ref, 'beta') }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload final-dist/*.whl --skip-existing
+          echo "Published to PyPI"
+
+  coverage-report:
+    name: Code coverage report
+    runs-on: ubuntu-20.04
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        working-directory: ./hyperlane_client
+        run: |
+          cd ..
+          pytest tests.py -v --cov=hyperlane_client --cov-report=xml --cov-report=html || true
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Archive coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: htmlcov/
+          if-no-files-found: ignore

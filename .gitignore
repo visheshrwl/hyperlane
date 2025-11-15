@@ -1,0 +1,53 @@
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+*.dll
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
+.Python
+env/
+venv/
+ENV/
+.venv
+.venv*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CUDA
+*.cubin
+*.fatbin
+
+# Temporary
+temp/
+tmp/
+*.tmp
+*.log
+
+# ONNX
+*.onnx
+hyperlane_shards_*/
+
+# gRPC generated files (after compilation)
+*_pb2.py
+*_pb2_grpc.py

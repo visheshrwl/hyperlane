@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package hyperlane.worker;
+
+import "google/protobuf/empty.proto";
+
+message WorkerStats {
+  string worker_id = 1;
+  string hostname = 2;
+  string gpu_name = 3;
+  uint64 total_memory = 4;
+  uint64 free_memory = 5;
+  repeated string supported_formats = 6;
+}
+
+message LoadShardRequest {
+  string shard_name = 1;
+  string model_path = 2;
+  string tensor_precision = 3;
+  uint32 input_token_size = 4;
+  string next_worker_address = 5;
+}
+
+message LoadShardResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ExecutionRequest {
+  string run_id = 1;
+  string input_tensor_name = 2;
+  string output_tensor_name = 3;
+  bytes metadata = 4;
+}
+
+message ExecutionResponse {
+  bool accepted = 1;
+  string status = 2;
+}
+
+message NextWorkerAddress {
+  string address = 1;
+}
+
+service Worker {
+  rpc GetStats(google.protobuf.Empty) returns (WorkerStats);
+  rpc LoadShard(LoadShardRequest) returns (LoadShardResponse);
+  rpc ExecutePipeline(ExecutionRequest) returns (ExecutionResponse);
+  rpc SetNextWorker(NextWorkerAddress) returns (google.protobuf.Empty);
+}

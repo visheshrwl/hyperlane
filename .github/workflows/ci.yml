@@ -1,0 +1,101 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Lint with pylint
+      run: |
+        pip install pylint
+        pylint hyperlane_client/hyperlane_client/ --disable=all --enable=E,F || true
+
+    - name: Format check with black
+      run: |
+        pip install black
+        black --check hyperlane_client/hyperlane_client/ --line-length 100 || true
+
+    - name: Run unit tests
+      run: |
+        python -m pytest tests.py -v
+
+  build-worker:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential cmake \
+          protobuf-compiler libprotobuf-dev \
+          libgrpc++-dev protobuf-compiler-grpc \
+          libavahi-client-dev libavahi-common-dev
+
+    - name: Install CUDA (mocked)
+      run: |
+        echo "Note: Full CUDA would require nvidia-container-toolkit in CI"
+        echo "Skipping CUDA build in CI; full test on GPU hardware required"
+
+    - name: Generate protobuf
+      run: |
+        cd hyperlane_client
+        python3 generate_grpc.py
+      continue-on-error: true
+
+    - name: CMake configuration (without CUDA)
+      run: |
+        mkdir -p hyperlane_worker/build
+        cd hyperlane_worker/build
+        cmake .. -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -20
+      continue-on-error: true
+
+  build-python:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+
+    - name: Build Python package
+      run: |
+        cd hyperlane_client
+        python setup.py build
+
+    - name: Install in editable mode
+      run: |
+        cd hyperlane_client
+        pip install -e .
+
+    - name: Test import
+      run: |
+        python -c "from hyperlane_client import DiscoveryManager, AutoDistributedModel; print('✓ Imports OK')"
