@@ -51,3 +51,14 @@ hyperlane_shards_*/
 # gRPC generated files (after compilation)
 *_pb2.py
 *_pb2_grpc.py
+
+COMPLETION_SUMMARY.md 
+DEVELOPMENT.md 
+INDEX.md 
+PROJECT_STATUS.md 
+PYPI_IMPLEMENTATION_STEPS.md 
+PYPI_UPLOAD_GUIDE.md 
+PYPI_UPLOAD_READINESS.md 
+QUICK_REFERENCE.md 
+WHEEL_BUILDING_GUIDE.md 
+WHEEL_BUILD_SUMMARY.txt
