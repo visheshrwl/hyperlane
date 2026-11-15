@@ -74,7 +74,9 @@ jobs:
         run: |
           cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release
           cmake --build --preset ${{ matrix.preset }}
-          ctest --preset ${{ matrix.preset }}
+          # ggml's Metal backend hangs on the hosted runners' virtual GPU (#35), so the
+          # Metal test runs on real Apple Silicon before a release is published.
+          ctest --preset ${{ matrix.preset }} ${{ runner.os == 'macOS' && '-E MetalAgreesWithTheCpu' || '' }}
       - name: Version
         run: test "$(worker/build/${{ matrix.preset }}/shardline-worker --version)" = "shardline-worker $VERSION"
       - name: Package
