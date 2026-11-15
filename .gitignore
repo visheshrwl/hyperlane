@@ -51,3 +51,4 @@ hyperlane_shards_*/
 # gRPC generated files (after compilation)
 *_pb2.py
 *_pb2_grpc.py
+*_pb2.pyi
