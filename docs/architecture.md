@@ -72,9 +72,40 @@ uv run --with ./.cache/llama.cpp/gguf-py --with sentencepiece python .cache/llam
   --outtype f16 --outfile .cache/models/tinyllama-1.1b-chat-f16.gguf
 cmake -S spike/stage -B .cache/build-stage -G Ninja -DCMAKE_BUILD_TYPE=Release   # add -DGGML_CUDA=ON on NVIDIA
 cmake --build .cache/build-stage
-uv run --extra oracle python spike/reference.py --gen 32 --out .cache/runs/ref
+uv run --extra oracle python scripts/reference.py --gen 32 --out .cache/runs/ref
 .cache/build-stage/stage_probe --model .cache/models/tinyllama-1.1b-chat-f16.gguf --backends gpu,cpu --cuts 11 \
   --gen 32 --tokens "$(python3 -c 'import json;print(",".join(map(str,json.load(open(".cache/runs/ref.tokens"))["prompt"])))')" \
   --logits .cache/runs/test.bin
-uv run python spike/compare.py .cache/runs/ref.bin .cache/runs/test.bin --prompt-len 27
+uv run python scripts/compare.py .cache/runs/ref.bin .cache/runs/test.bin --prompt-len 27
 ```
+
+## Worker protocol and the vertical slice
+
+The spike's engine now lives in the worker (`worker/src/ggml_backend.cc`) behind a `Backend` interface, and the coordinator in `python/shardline/pipeline.py` drives it over `shardline.v1`.
+
+### Protocol
+
+- `LoadShard` names a model by its SHA-256 and a layer range. The worker opens `<model dir>/<sha256>.gguf` and nothing else: there is no path field, and the digest must be 64 lowercase hex digits. A worker holds one shard; loading another closes the sessions of the old one, and a failed load leaves no shard.
+- `Forward` is a bidirectional stream. The first shard takes token ids and every other shard takes hidden states as float32 tensors; the shard that holds the head returns the greedy next token, and its logits only when asked. Without them it computes only the last row, because all rows of a long prompt at a real vocabulary size do not fit in a message.
+- Every request carries the position the session should be at. The worker refuses a mismatch, so a lost or repeated step fails instead of giving a wrong answer.
+- A session starts with the first request that names it, at position 0, and belongs to the stream that started it: when the stream ends, so do its sessions, and a coordinator that dies leaves no KV caches behind. `CloseSession` frees one early. An error ends the stream with a status and closes its sessions.
+- Messages up to 64 MiB are accepted; gRPC's 4 MiB default is smaller than the hidden states of a few hundred tokens of a large model.
+- The coordinator relays every hop (a star): tokens to the first worker, its hidden states to the next, and the last worker's token back.
+
+### Checked
+
+`scripts/e2e_smoke.sh` starts real worker processes and compares one, two and three of them against each other and against Hugging Face's fp32 model. Every split is bit-exact with a single worker on the same backend. Against Hugging Face on TinyLlama (27 prompt tokens, 32 generated), greedy tokens are equal in every configuration:
+
+| Backend | Weights | max abs Δlogit | mean KL |
+|---|---|---|---|
+| CPU | F32 | 1.33e-4 | 7.45e-12 |
+| Metal | F16 | 4.30e-2 | 2.68e-06 |
+
+These are the spike's numbers, reproduced through gRPC between separate processes. CI runs the same script on a random 4-layer Llama that needs no download.
+
+### Not done
+
+- The transport benchmark (gRPC streaming against framed raw TCP with injected latency) and a speed measurement across two machines, so the pivot rule is not evaluated yet.
+- The worker trusts the file it finds under a digest. The coordinator hashes a model when it adds it, but the worker does not verify it on load.
+- The worker has no authentication, so a worker that listens beyond loopback accepts calls from anyone who can reach it.
+- Quantized weights, Llama 3 RoPE scaling and Qwen2 biases are as untested as in the spike.
