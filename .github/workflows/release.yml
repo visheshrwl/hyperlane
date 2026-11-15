@@ -1,9 +1,14 @@
 name: Release
 
 # A tag vX.Y.Z... builds the Python package and the worker for Linux and macOS, checks
-# them, and opens a draft GitHub release with the files, their SHA-256 sums and build
-# provenance. A person publishes the draft. Pull requests that touch the packaging run
-# everything except the release.
+# them, and attaches the files, their SHA-256 sums and build provenance to the draft
+# release for that tag. The maintainer drafts the release first, so that it is theirs,
+# and publishes it once the files are there:
+#
+#   gh release create vX.Y.Z --draft [--prerelease] --title "shardline X.Y.Z" --notes-file NOTES
+#   git tag -a vX.Y.Z -m "shardline X.Y.Z" && git push origin vX.Y.Z
+#
+# Pull requests that touch the packaging run everything except the upload.
 on:
   push:
     tags: ["v*"]
@@ -139,14 +144,12 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/*
-      - name: Draft the release
+      - name: Attach the files to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Versions like 0.1.0a1 or 1.0.0rc1 are pre-releases.
-          prerelease=false
-          [[ $GITHUB_REF_NAME == *[abc]* ]] && prerelease=true
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
-            --draft --verify-tag --prerelease="$prerelease" \
-            --title "shardline ${{ needs.python.outputs.version }}" \
-            --notes "Draft: notes to be written before publishing."
+          if [[ $(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft) != true ]]; then
+            echo "no draft release for $GITHUB_REF_NAME; draft it first (see the top of this file)" >&2
+            exit 1
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY"
