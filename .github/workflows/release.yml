@@ -1,0 +1,150 @@
+name: Release
+
+# A tag vX.Y.Z... builds the Python package and the worker for Linux and macOS, checks
+# them, and opens a draft GitHub release with the files, their SHA-256 sums and build
+# provenance. A person publishes the draft. Pull requests that touch the packaging run
+# everything except the release.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/package_worker.sh
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - id: version
+        run: |
+          version=$(uv version --short)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ $GITHUB_REF_TYPE == tag && $GITHUB_REF_NAME != "v$version" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match pyproject.toml version $version" >&2
+            exit 1
+          fi
+      - run: uv build
+      - name: The wheel installs and runs
+        run: uv run --isolated --no-project --with dist/*.whl shardline --help
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python
+          path: dist/*
+          if-no-files-found: error
+
+  worker:
+    needs: python
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: cpu
+            platform: linux-x86_64
+          - os: macos-15
+            preset: metal
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.python.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config \
+            libgrpc++-dev libprotobuf-dev protobuf-compiler protobuf-compiler-grpc \
+            libavahi-compat-libdnssd-dev
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja grpc protobuf
+      - name: Build
+        working-directory: worker
+        run: |
+          cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release
+          cmake --build --preset ${{ matrix.preset }}
+          ctest --preset ${{ matrix.preset }}
+      - name: Version
+        run: test "$(worker/build/${{ matrix.preset }}/shardline-worker --version)" = "shardline-worker $VERSION"
+      - name: Package
+        run: scripts/package_worker.sh worker/build/${{ matrix.preset }} "$VERSION" ${{ matrix.platform }} dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python
+          path: python-dist
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv python install 3.12
+      - name: Hide Homebrew (macOS)
+        # The packaged worker must not need anything Homebrew installed.
+        if: runner.os == 'macOS'
+        run: sudo mv /opt/homebrew/Cellar /opt/homebrew/Cellar.hidden
+      - name: The packaged worker answers the packaged client
+        run: |
+          mkdir unpacked
+          tar -C unpacked -xzf dist/shardline-worker-*.tar.gz
+          worker=$(echo unpacked/*/bin/shardline-worker)
+          "$worker" --listen 127.0.0.1:50051 &
+          pid=$!
+          trap 'kill $pid' EXIT
+          for _ in $(seq 50); do
+            uv run --isolated --no-project --python 3.12 --with python-dist/*.whl \
+              shardline stats 127.0.0.1:50051 && exit 0
+            sleep 0.2
+          done
+          exit 1
+      - name: Runtime packages are enough (Linux)
+        # The release notes list these packages; a bare Ubuntu 24.04 with only them runs it.
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/unpacked:/opt/unpacked:ro" ubuntu:24.04 bash -c '
+            apt-get update -qq &&
+            DEBIAN_FRONTEND=noninteractive apt-get install -qq -y --no-install-recommends \
+              libgrpc++1.51t64 libprotobuf32t64 libavahi-compat-libdnssd1 >/dev/null &&
+            /opt/unpacked/*/bin/shardline-worker --version'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: worker-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [python, worker]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - working-directory: dist
+        run: sha256sum -- * | tee SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Versions like 0.1.0a1 or 1.0.0rc1 are pre-releases.
+          prerelease=false
+          [[ $GITHUB_REF_NAME == *[abc]* ]] && prerelease=true
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --draft --verify-tag --prerelease="$prerelease" \
+            --title "shardline ${{ needs.python.outputs.version }}" \
+            --notes "Draft: notes to be written before publishing."
