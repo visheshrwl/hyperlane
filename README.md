@@ -1,245 +1,81 @@
-# Hyperlane
+# shardline
 
-**Distributed GPU Inference Engine for Heterogeneous Prosumer Hardware**
+**Pipeline-parallel LLM serving across a LAN of mixed NVIDIA and Apple Silicon machines.**
 
-Hyperlane enables single-command LLM inference across multiple consumer GPUs on a local area network. It uses pipeline parallelism to split large models layer-wise and coordinates execution with minimal network overhead.
+shardline (formerly Hyperlane) aims to serve models that don't fit in any single machine's GPU memory. It splits them layer-wise across 2–4 machines, any mix of NVIDIA GPUs on Linux and Apple Silicon Macs, behind one OpenAI-compatible endpoint.
 
-## Architecture
+Pipeline parallelism adds capacity, not single-stream speed: one request keeps one stage busy at a time, so throughput gains need several requests in flight.
 
-Hyperlane is split into two core components:
+## Status
 
-### hyperlane_worker (C++/CUDA)
-High-performance inference server with:
-- **Control Plane**: gRPC service for model shard loading and orchestration
-- **Execution Engine**: ONNX Runtime with CUDA provider for layer execution
-- **Data Plane**: Async TCP sockets for inter-worker tensor transmission
-- **Service Discovery**: Avahi/mDNS registration with GPU stats in TXT records
-- **Optimization**: FP16→INT4 quantization, async CUDA streams, pinned memory DMA
+**Pre-alpha. It cannot run a model yet.** What exists today:
 
-### hyperlane_client (Python)
-User-friendly orchestration library with:
-- **Discovery**: zeroconf-based auto-discovery of workers on the LAN
-- **Sharding**: Knapsack partitioning algorithm for layer distribution
-- **ONNX Export**: torch.onnx.export for shard compilation
-- **gRPC Orchestration**: Async client for worker control
-- **pybind11 Bridge**: Zero-copy tensor socket for efficient inference starts
+| Area | State |
+|---|---|
+| Worker (`worker/`, C++20) | Builds CPU-only on macOS (arm64) and Linux. Serves `shardline.v1.WorkerService/GetStats` over gRPC, reporting host RAM, the Metal working-set limit on Apple Silicon and, when built with `SHARDLINE_CUDA=ON`, CUDA free/total memory. Binds `127.0.0.1` by default; there is no authentication yet |
+| Discovery | Workers advertise `_shardline._tcp` over mDNS (`--advertise`, non-loopback listeners only) using the dns_sd API: native on macOS, Avahi's compat library on Linux |
+| Python package (`python/shardline`) | gRPC client and `shardline stats` / `shardline discover` CLI. Pure Python; torch is only in the `oracle` extra |
+| Layer planner | The current partitioner assigns layers **non-contiguously**, which is invalid for a pipeline (recorded as a strict xfail test). A contiguous, throughput-aware planner replaces it |
+| Model execution, activation transport, OpenAI API | Not implemented. The planned engine is ggml, with gRPC streaming between stages |
+| CUDA | The device probe compiles in CI (`nvidia/cuda` container). Not yet run on an NVIDIA GPU |
 
-## Pipeline Parallelism
+## Build
 
-Models are partitioned **layer-wise** (not tensor-wise) to minimize network latency:
-
-```
-Input → GPU A (Layers 1-10) → GPU B (Layers 11-20) → GPU C (Layers 21-32) → Output
-```
-
-Each GPU:
-1. Executes its layers on the input tensor (FP16/FP32)
-2. Quantizes output to INT4 in VRAM
-3. Async D2H copy to pinned host memory
-4. Sends via TCP socket (DMA-friendly)
-5. Next GPU receives and async H2D + dequantizes
-
-This overlap minimizes pipeline bubbles and network blocking.
-
-## Installation
-
-### System Requirements
-- Ubuntu 20.04+ (Linux only)
-- NVIDIA GPU with CUDA Compute Capability 6.0+
-- CUDA Toolkit 11.8+
-- cuDNN 8.0+
-- gRPC + protobuf
-- ONNX Runtime with CUDA provider
-- Avahi (mDNS)
-
-### Quick Setup
+### macOS (Apple Silicon)
 
 ```bash
-# Install system dependencies
-sudo apt-get update
-sudo apt-get install -y \
-  build-essential cmake \
-  protobuf-compiler libprotobuf-dev \
-  libgrpc++-dev protobuf-compiler-grpc \
-  libavahi-client-dev libavahi-common-dev \
-  python3-dev python3-pip
-
-# Download/install CUDA and cuDNN (if not present)
-# https://developer.nvidia.com/cuda-toolkit
-# https://developer.nvidia.com/cudnn
-
-# Install onnxruntime-gpu
-pip install onnxruntime-gpu
-
-# Clone and build
-git clone <repo> hyperlane
-cd hyperlane
-bash build.sh
+brew install cmake ninja grpc protobuf
+cd worker
+cmake --preset cpu && cmake --build --preset cpu && ctest --preset cpu
 ```
 
-## Quick Start
-
-### Start a Worker
+### Linux (Ubuntu 24.04)
 
 ```bash
-# On GPU machine 1 (port 50051 default)
-./hyperlane_worker/build/hyperlane_worker
-
-# On GPU machine 2 (port 50052)
-./hyperlane_worker/build/hyperlane_worker 50052
-
-# On GPU machine 3 (port 50053)
-./hyperlane_worker/build/hyperlane_worker 50053
+sudo apt-get install -y cmake ninja-build g++ pkg-config \
+  libgrpc++-dev libprotobuf-dev protobuf-compiler protobuf-compiler-grpc \
+  libavahi-compat-libdnssd-dev avahi-daemon
+cd worker
+cmake --preset cpu && cmake --build --preset cpu && ctest --preset cpu
 ```
 
-Workers will register themselves via Avahi/mDNS and expose GPU stats.
+Use `--preset cuda` instead of `cpu` to also report NVIDIA GPUs (requires the CUDA toolkit).
 
-### Load and Run a Model
+### Python
 
-```python
-import asyncio
-from hyperlane_client import DiscoveryManager, AutoDistributedModel
-
-async def main():
-    # Discover workers on LAN
-    discovery = DiscoveryManager()
-    discovery.start_discovery()
-    await asyncio.sleep(2)  # Wait for discovery
-    
-    print(f"Found {len(discovery.discovered_workers)} workers")
-    
-    # Load model and auto-shard across workers
-    model = AutoDistributedModel.from_pretrained(
-        "meta-llama/Llama-2-7b-hf",
-        discovery
-    )
-    
-    # Run inference
-    output = model.generate("What is machine learning?", max_tokens=128)
-    print(output)
-    
-    discovery.stop_discovery()
-
-asyncio.run(main())
-```
-
-## File Structure
-
-```
-.
-├── hyperlane_worker/              # C++/CUDA inference server
-│   ├── CMakeLists.txt
-│   ├── include/                   # Headers
-│   │   ├── worker.h              # Main orchestrator
-│   │   ├── service_impl.h        # gRPC service
-│   │   ├── onnx_session.h        # ONNX Runtime wrapper
-│   │   ├── tensor_sender.h       # Async sender
-│   │   ├── tensor_receiver.h     # Async receiver
-│   │   ├── cuda_ops.h            # Quantization kernels
-│   └── src/                       # Implementations
-│       ├── main.cc
-│       ├── worker.cc
-│       ├── service_impl.cc
-│       ├── onnx_session.cc
-│       ├── tensor_sender.cc
-│       ├── tensor_receiver.cc
-│       ├── cuda_ops.cu
-│       └── service_discovery.cc
-├── hyperlane_client/              # Python orchestration
-│   ├── setup.py
-│   ├── generate_grpc.py          # Proto compilation script
-│   ├── hyperlane_client/
-│   │   ├── __init__.py
-│   │   ├── discovery.py          # Zeroconf discovery
-│   │   ├── orchestrator.py       # Model sharding & deployment
-│   │   └── grpc_client.py        # Worker gRPC client
-│   └── pybind/
-│       ├── CMakeLists.txt
-│       ├── tensor_socket.h       # pybind11 wrapper
-│       ├── tensor_socket.cpp     # Implementation
-│       └── tensor_socket.py      # Python interface
-├── proto/
-│   └── service.proto             # gRPC service definition
-├── build.sh                       # Build script
-└── README.md                      # This file
-```
-
-## Performance Considerations
-
-1. **Quantization**: INT4 reduces tensor size 4x, but verify accuracy on your models.
-2. **Network**: 1 Gbps LAN is sufficient for most prosumer setups; higher is better.
-3. **Pinned Memory**: Allocate based on available system RAM (512 MB default per worker).
-4. **CUDA Streams**: Overlap D2H, socket send, and next H2D for minimal latency.
-
-## Troubleshooting
-
-### Worker doesn't start
 ```bash
-# Check CUDA availability
-nvidia-smi
-
-# Check port
-lsof -i :50051
-
-# Check Avahi daemon
-systemctl status avahi-daemon
+uv sync
+uv run pytest                     # unit tests
+SHARDLINE_WORKER_BIN=worker/build/cpu/shardline-worker uv run pytest   # plus tests against the real worker
 ```
 
-### Discovery fails
-```bash
-# Ensure Avahi is running
-sudo systemctl start avahi-daemon
+## Try it
 
-# Check mDNS resolution
-avahi-browse -a
+```bash
+worker/build/cpu/shardline-worker --listen 127.0.0.1:50051 &
+uv run shardline stats 127.0.0.1:50051
 ```
 
-### gRPC connection refused
-```bash
-# Verify worker is running and listening
-netstat -tlnp | grep hyperlane_worker
+To make a worker discoverable from other machines, run it with `--listen 0.0.0.0:50051 --advertise` and use `uv run shardline discover`. This exposes an unauthenticated control port to your network, so only do it on a network you trust. On macOS the application firewall asks whether `shardline-worker` may accept incoming connections.
 
-# Check firewall
-sudo ufw allow 50051:50100/tcp
+## Repository layout
+
 ```
-
-## Development
-
-### Build just the worker
-```bash
-cd hyperlane_worker
-mkdir -p build && cd build
-cmake .. && cmake --build .
-```
-
-### Build just the Python client
-```bash
-cd hyperlane_client
-python3 setup.py develop
-```
-
-### Run tests (TODO)
-```bash
-pytest tests/
+proto/shardline/v1/   gRPC protocol (checked by buf lint and buf breaking)
+worker/               C++ worker: CMake presets, sources, GoogleTest tests
+python/shardline/     Python client, discovery and CLI; stubs generated at build time
+tests/                pytest suite
 ```
 
 ## Roadmap
 
-- [ ] TensorRT engine support (beyond ONNX)
-- [ ] Dynamic layer redistribution based on load
-- [ ] Speculative decoding for batch inference
-- [ ] Quantization-aware training (QAT)
-- [ ] Web dashboard for monitoring
-- [ ] Support for other accelerators (AMD, Intel)
+1. Backend spike and vertical slice: TinyLlama generating across two worker processes, matching a single-process reference exactly on the same backend
+2. Contiguous planner that balances by measured throughput and usable (not total) memory
+3. `shardline serve` with an OpenAI-compatible API, queueing and micro-batching
+4. Health checks, metrics, failure detection, graceful drain
+5. mTLS cluster join, content-addressed weight delivery, Docker image for Linux/NVIDIA, Homebrew tap for macOS
+6. Reproducible benchmarks against a single device and existing distributed runtimes
 
 ## License
 
-MIT (or chosen license)
-
-## Contributing
-
-Pull requests welcome. Please ensure:
-- Code follows project style (clang-format for C++, black for Python)
-- All async code is non-blocking
-- Performance-critical paths are validated on real hardware
-
+[Apache-2.0](LICENSE)

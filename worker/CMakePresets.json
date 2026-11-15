@@ -1,0 +1,40 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "cpu",
+      "displayName": "CPU-only build (Metal device probing on macOS)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/cpu",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "SHARDLINE_WERROR": "ON"
+      }
+    },
+    {
+      "name": "cuda",
+      "displayName": "With CUDA device probing",
+      "inherits": "cpu",
+      "binaryDir": "${sourceDir}/build/cuda",
+      "cacheVariables": {
+        "SHARDLINE_CUDA": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "cpu", "configurePreset": "cpu" },
+    { "name": "cuda", "configurePreset": "cuda" }
+  ],
+  "testPresets": [
+    {
+      "name": "cpu",
+      "configurePreset": "cpu",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
