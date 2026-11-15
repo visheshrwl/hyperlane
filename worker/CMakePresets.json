@@ -3,13 +3,24 @@
   "configurePresets": [
     {
       "name": "cpu",
-      "displayName": "CPU-only build (Metal device probing on macOS)",
+      "displayName": "ggml on the CPU only (Metal device probing on macOS)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/cpu",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "SHARDLINE_WERROR": "ON"
+        "SHARDLINE_WERROR": "ON",
+        "SHARDLINE_GGML_METAL": "OFF"
       }
+    },
+    {
+      "name": "metal",
+      "displayName": "ggml on the CPU and the Apple GPU",
+      "inherits": "cpu",
+      "binaryDir": "${sourceDir}/build/metal",
+      "cacheVariables": {
+        "SHARDLINE_GGML_METAL": "ON"
+      },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
     },
     {
       "name": "cuda",
@@ -23,12 +34,18 @@
   ],
   "buildPresets": [
     { "name": "cpu", "configurePreset": "cpu" },
+    { "name": "metal", "configurePreset": "metal" },
     { "name": "cuda", "configurePreset": "cuda" }
   ],
   "testPresets": [
     {
       "name": "cpu",
       "configurePreset": "cpu",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "metal",
+      "configurePreset": "metal",
       "output": { "outputOnFailure": true }
     },
     {

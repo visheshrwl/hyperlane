@@ -9,6 +9,15 @@ import grpc
 
 from shardline.v1 import worker_pb2, worker_pb2_grpc
 
+# The worker accepts messages of this size. gRPC's own default of 4 MiB is
+# smaller than the hidden states of a few hundred tokens of a large model.
+MAX_MESSAGE_BYTES = 64 << 20
+
+CHANNEL_OPTIONS = (
+    ("grpc.max_send_message_length", MAX_MESSAGE_BYTES),
+    ("grpc.max_receive_message_length", MAX_MESSAGE_BYTES),
+)
+
 
 def first_reachable(targets: Sequence[str], timeout: float = 1.0) -> str | None:
     """The first target, in the order given, that accepts a gRPC connection in time.
@@ -35,7 +44,7 @@ def first_reachable(targets: Sequence[str], timeout: float = 1.0) -> str | None:
 
 class WorkerClient:
     def __init__(self, target: str, timeout: float = 5.0):
-        self._channel = grpc.insecure_channel(target)
+        self._channel = grpc.insecure_channel(target, options=CHANNEL_OPTIONS)
         self._stub = worker_pb2_grpc.WorkerServiceStub(self._channel)
         self._timeout = timeout
 

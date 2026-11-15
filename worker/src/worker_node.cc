@@ -57,9 +57,16 @@ WorkerNode::WorkerNode(WorkerOptions options)
 WorkerNode::~WorkerNode() { shutdown(); }
 
 bool WorkerNode::start() {
-  service_ = std::make_unique<WorkerServiceImpl>(worker_id_, hostname_);
+  ServiceConfig config;
+  config.model_dir = options_.model_dir;
+  config.threads = options_.threads;
+  config.backend_factory = options_.backend_factory;
+  service_ = std::make_unique<WorkerServiceImpl>(worker_id_, hostname_,
+                                                 std::move(config));
 
   grpc::ServerBuilder builder;
+  builder.SetMaxReceiveMessageSize(kMaxMessageBytes);
+  builder.SetMaxSendMessageSize(kMaxMessageBytes);
   builder.AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
   builder.AddListeningPort(options_.listen_address,
                            grpc::InsecureServerCredentials(), &port_);

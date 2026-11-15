@@ -27,7 +27,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-oracle = ["torch>=2.6", "transformers>=4.50"]
+oracle = [
+    "gguf>=0.19.0",
+    "numpy>=2.4.6",
+    "torch>=2.6",
+    "transformers>=4.50",
+]
 
 [project.urls]
 Homepage = "https://github.com/visheshrwl/shardline"
@@ -58,8 +63,8 @@ xfail_strict = true
 
 [tool.ruff]
 line-length = 100
-src = ["python", "tests"]
-include = ["python/**/*.py", "tests/**/*.py", "hatch_build.py"]
+src = ["python", "tests", "scripts"]
+include = ["python/**/*.py", "tests/**/*.py", "scripts/**/*.py", "hatch_build.py"]
 target-version = "py311"
 extend-exclude = ["python/shardline/v1/*_pb2*"]
 
@@ -68,3 +73,13 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["shardline"]
+
+# The default Linux wheel of torch pulls in gigabytes of CUDA libraries, which the oracle
+# scripts never use, so Linux takes the CPU-only build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
