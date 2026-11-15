@@ -146,13 +146,15 @@ if(SHARDLINE_BUILD_TESTS)
     tests/devices_test.cc
     tests/discovery_test.cc
     tests/model_path_test.cc
-    tests/worker_node_test.cc)
+    tests/worker_node_test.cc
+    tests/worker_service_test.cc)
   target_link_libraries(shardline_tests PRIVATE shardline_core GTest::gtest_main)
   target_compile_options(shardline_tests PRIVATE
     -Wall -Wextra $<$<BOOL:${SHARDLINE_WERROR}>:-Werror>)
   if(SHARDLINE_GGML)
     target_sources(shardline_tests PRIVATE
       tests/backend_test.cc
+      tests/service_ggml_test.cc
       tests/tiny_model.cc)
     target_compile_definitions(shardline_tests PRIVATE SHARDLINE_HAVE_GGML=1)
     if(APPLE AND SHARDLINE_GGML_METAL)

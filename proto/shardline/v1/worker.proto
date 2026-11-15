@@ -6,6 +6,20 @@ package shardline.v1;
 service WorkerService {
   // Reports the worker's identity and the compute devices it can use.
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+
+  // Loads a range of layers of a model that is already in the worker's model
+  // directory. A worker holds one shard: loading another replaces it and
+  // closes every session of the old one. If the load fails, no shard is left.
+  rpc LoadShard(LoadShardRequest) returns (LoadShardResponse);
+
+  // Runs the loaded shard. Requests on a stream are answered in order. A
+  // session starts with the first request that names it, at position 0, and
+  // lasts until CloseSession or until the stream that started it ends. An
+  // error ends the stream with a status and so closes its sessions.
+  rpc Forward(stream ForwardRequest) returns (stream ForwardResponse);
+
+  // Frees a session's KV cache before its stream ends.
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
 }
 
 enum DeviceKind {
@@ -39,3 +53,94 @@ message GetStatsResponse {
   string worker_version = 4;
   repeated DeviceInfo devices = 5;
 }
+
+message LoadShardRequest {
+  // Lowercase hex SHA-256 of the GGUF file. The worker opens
+  // <model directory>/<sha256>.gguf. There is deliberately no path field.
+  string model_sha256 = 1;
+  // First layer to run, inclusive. A shard that starts at 0 holds the token
+  // embedding.
+  uint32 layer_begin = 2;
+  // Last layer to run, exclusive. 0 means through the model's last layer,
+  // and a shard that reaches it holds the output norm and the head.
+  uint32 layer_end = 3;
+  // Tokens of KV cache each session may hold. 0 means 512.
+  uint32 context_length = 4;
+  // Where to run the layers. Unspecified means the first accelerator the
+  // worker can use, otherwise the CPU.
+  DeviceKind device = 5;
+}
+
+message ModelInfo {
+  uint32 n_layer = 1;
+  uint32 n_embd = 2;
+  uint32 n_vocab = 3;
+  uint32 n_ctx_train = 4;
+}
+
+message ShardInfo {
+  uint32 layer_begin = 1;
+  uint32 layer_end = 2;
+  bool has_embedding = 3;
+  bool has_head = 4;
+  uint64 weight_bytes = 5;
+  DeviceKind device = 6;
+  // The engine's own name for the device.
+  string backend = 7;
+}
+
+message LoadShardResponse {
+  ModelInfo model = 1;
+  ShardInfo shard = 2;
+}
+
+enum TensorType {
+  TENSOR_TYPE_UNSPECIFIED = 0;
+  TENSOR_TYPE_F32 = 1;
+}
+
+// Dense, row-major, little-endian.
+message Tensor {
+  TensorType type = 1;
+  repeated uint32 shape = 2;
+  bytes data = 3;
+}
+
+message TokenIds {
+  repeated int32 ids = 1;
+}
+
+message ForwardRequest {
+  // Chosen by the caller. A worker holds only a few at once.
+  string session_id = 1;
+  // Tokens the session already holds on this shard. It must match, so a lost
+  // or repeated step fails instead of producing a wrong answer.
+  uint32 position = 2;
+  oneof input {
+    // For the shard that holds the embedding.
+    TokenIds tokens = 3;
+    // For every other shard: [n_tokens, n_embd] hidden states.
+    Tensor hidden = 4;
+  }
+  // For the shard that holds the head: also return the logits. Without it
+  // only the last row is computed and only next_token is returned.
+  bool return_logits = 5;
+}
+
+message ForwardResponse {
+  string session_id = 1;
+  // Tokens the session holds after this step.
+  uint32 position = 2;
+  // Set by every shard except the one that holds the head.
+  Tensor hidden = 3;
+  // Set by the shard that holds the head, when asked: [rows, n_vocab].
+  Tensor logits = 4;
+  // Set by the shard that holds the head: the greedy choice for the last row.
+  optional int32 next_token = 5;
+}
+
+message CloseSessionRequest {
+  string session_id = 1;
+}
+
+message CloseSessionResponse {}

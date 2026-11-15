@@ -16,6 +16,11 @@ struct WorkerOptions {
   std::string listen_address = "127.0.0.1:50051";
   bool advertise = false;
   std::string worker_id;
+  // Where LoadShard looks for <sha256>.gguf. Empty means no model can load.
+  std::string model_dir;
+  int threads = 4;
+  // Empty means the ggml engine. Tests put a fake here.
+  BackendFactory backend_factory;
 };
 
 class WorkerNode {
