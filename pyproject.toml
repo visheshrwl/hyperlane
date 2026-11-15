@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "shardline"
-version = "0.1.0.dev0"
+version = "0.1.0a1"
 description = "Pipeline-parallel LLM serving across mixed NVIDIA and Apple Silicon machines on a LAN"
 readme = "README.md"
 license = "Apache-2.0"

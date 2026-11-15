@@ -20,6 +20,21 @@ Pipeline parallelism adds capacity, not single-stream speed: one request keeps o
 | OpenAI API, queueing, micro-batching | Not implemented. Activations travel over gRPC streams, relayed hop by hop by the coordinator |
 | CUDA | The device probe is built by the `worker-cuda` CI job (`nvidia/cuda` container). It has run on one NVIDIA GPU, an RTX 3050 Laptop, and reported 3.6 of 3.7 GiB free, matching `nvidia-smi` |
 
+## Install a release
+
+The [releases](https://github.com/visheshrwl/shardline/releases) have the worker for macOS on Apple Silicon (CPU and Metal, with its gRPC libraries bundled) and for Linux x86-64 (CPU, built on Ubuntu 24.04), and the `shardline` command as a Python wheel:
+
+```bash
+V=0.1.0a1
+P=macos-arm64        # or linux-x86_64
+curl -LO https://github.com/visheshrwl/shardline/releases/download/v$V/shardline-worker-$V-$P.tar.gz
+tar -xzf shardline-worker-$V-$P.tar.gz
+shardline-worker-$V-$P/bin/shardline-worker --version
+uv tool install https://github.com/visheshrwl/shardline/releases/download/v$V/shardline-$V-py3-none-any.whl
+```
+
+On Linux the worker needs `sudo apt-get install libgrpc++1.51t64 libprotobuf32t64 libavahi-compat-libdnssd1`, plus `avahi-daemon` for `--advertise`. On macOS, a tarball downloaded with a browser is quarantined: run `xattr -dr com.apple.quarantine shardline-worker-$V-$P` once. Every file has a SHA-256 in `SHA256SUMS` and build provenance you can check with `gh attestation verify <file> --repo visheshrwl/shardline`.
+
 ## Build
 
 ### macOS (Apple Silicon)

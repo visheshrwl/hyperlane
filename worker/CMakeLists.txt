@@ -86,8 +86,10 @@ add_library(shardline_core STATIC
   src/worker_service.cc)
 target_include_directories(shardline_core PUBLIC include)
 target_link_libraries(shardline_core PUBLIC shardline_proto Threads::Threads)
+# The release version, in Python's spelling (0.1.0a1); pyproject.toml carries the same.
+set(SHARDLINE_VERSION "${PROJECT_VERSION}a1")
 target_compile_definitions(shardline_core PRIVATE
-  SHARDLINE_VERSION="${PROJECT_VERSION}")
+  SHARDLINE_VERSION="${SHARDLINE_VERSION}")
 target_compile_options(shardline_core PRIVATE
   -Wall -Wextra -Wpedantic
   $<$<BOOL:${SHARDLINE_WERROR}>:-Werror>
