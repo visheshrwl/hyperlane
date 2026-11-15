@@ -59,6 +59,7 @@ xfail_strict = true
 [tool.ruff]
 line-length = 100
 src = ["python", "tests"]
+include = ["python/**/*.py", "tests/**/*.py", "hatch_build.py"]
 target-version = "py311"
 extend-exclude = ["python/shardline/v1/*_pb2*"]
 
