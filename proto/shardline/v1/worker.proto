@@ -64,7 +64,8 @@ message LoadShardRequest {
   // Last layer to run, exclusive. 0 means through the model's last layer,
   // and a shard that reaches it holds the output norm and the head.
   uint32 layer_end = 3;
-  // Tokens of KV cache each session may hold. 0 means 512.
+  // Tokens of KV cache each session may hold. 0 means 512, or the model's
+  // trained context when that is smaller.
   uint32 context_length = 4;
   // Where to run the layers. Unspecified means the first accelerator the
   // worker can use, otherwise the CPU.
@@ -87,6 +88,8 @@ message ShardInfo {
   DeviceKind device = 6;
   // The engine's own name for the device.
   string backend = 7;
+  // Tokens of KV cache each session may hold, once the default is resolved.
+  uint32 context_length = 8;
 }
 
 message LoadShardResponse {

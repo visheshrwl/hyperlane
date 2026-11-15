@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -15,6 +16,8 @@
 namespace shardline {
 
 namespace {
+
+constexpr uint32_t kDefaultContextLength = 512;
 
 [[noreturn]] void fail(ErrorKind kind, const std::string& message) {
   throw BackendError(kind, message);
@@ -179,9 +182,9 @@ class GgmlBackend final : public Backend {
     }
 
     const uint32_t n_tokens = count_tokens(input);
-    if (static_cast<uint64_t>(session.n_past) + n_tokens > spec_.context_length) {
+    if (static_cast<uint64_t>(session.n_past) + n_tokens > context_length_) {
       fail(ErrorKind::kResourceExhausted,
-           "the context holds " + std::to_string(spec_.context_length) +
+           "the context holds " + std::to_string(context_length_) +
                " tokens, which this step would exceed");
     }
 
@@ -424,11 +427,15 @@ class GgmlBackend final : public Backend {
                std::to_string(shard_.layer_end) + ") are outside the model's " +
                std::to_string(model_.n_layer));
     }
-    if (spec_.context_length == 0 || spec_.context_length > model_.n_ctx_train) {
+    context_length_ = spec_.context_length != 0
+                          ? spec_.context_length
+                          : std::min(kDefaultContextLength, model_.n_ctx_train);
+    if (context_length_ == 0 || context_length_ > model_.n_ctx_train) {
       fail(ErrorKind::kInvalidArgument,
            "the context length must be between 1 and the trained " +
                std::to_string(model_.n_ctx_train));
     }
+    shard_.context_length = context_length_;
     shard_.has_embedding = shard_.layer_begin == 0;
     shard_.has_head = shard_.layer_end == model_.n_layer;
   }
@@ -518,9 +525,9 @@ class GgmlBackend final : public Backend {
     }
     for (size_t i = 0; i < layers_.size(); ++i) {
       session->k_cache.push_back(ggml_new_tensor_3d(
-          session->context, GGML_TYPE_F32, head_dim_, n_head_kv_, spec_.context_length));
+          session->context, GGML_TYPE_F32, head_dim_, n_head_kv_, context_length_));
       session->v_cache.push_back(ggml_new_tensor_3d(
-          session->context, GGML_TYPE_F32, head_dim_, n_head_kv_, spec_.context_length));
+          session->context, GGML_TYPE_F32, head_dim_, n_head_kv_, context_length_));
     }
     session->buffer = ggml_backend_alloc_ctx_tensors(session->context, backend_);
     if (session->buffer == nullptr) {
@@ -537,6 +544,7 @@ class GgmlBackend final : public Backend {
   uint32_t n_head_ = 0;
   uint32_t n_head_kv_ = 0;
   uint32_t head_dim_ = 0;
+  uint32_t context_length_ = 0;
   float rope_base_ = 10000.0f;
   float rms_eps_ = 1e-5f;
 

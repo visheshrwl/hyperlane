@@ -158,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
     generate.add_argument("--tokens", required=True, help="the prompt as comma-separated token ids")
     generate.add_argument("--max-new-tokens", type=int, default=32)
     generate.add_argument("--device", choices=sorted(DEVICES), default="auto")
-    generate.add_argument("--context", type=int, default=0, help="KV cache tokens; 0 is 512")
+    generate.add_argument(
+        "--context", type=int, default=0, help="KV cache tokens; 0 is 512 or the model's limit"
+    )
     generate.add_argument("--step-timeout", type=float, default=120.0, help="seconds per hop")
     generate.add_argument("--logits-out", help="also write every logits row to this file")
 

@@ -35,6 +35,7 @@ class FakeBackend final : public Backend {
     shard_.has_embedding = shard_.layer_begin == 0;
     shard_.has_head = shard_.layer_end == kLayers;
     shard_.weight_bytes = 1234;
+    shard_.context_length = spec.context_length != 0 ? spec.context_length : 64;
     shard_.backend = std::string("fake-") + device_kind_name(spec.device);
   }
 
@@ -228,7 +229,7 @@ TEST(WorkerService, LoadsAShardByDigest) {
   EXPECT_EQ(worker.specs()[0].model_path, "/models/" + kDigest + ".gguf");
   EXPECT_EQ(worker.specs()[0].layer_begin, 0u);
   EXPECT_EQ(worker.specs()[0].layer_end, 2u);
-  EXPECT_EQ(worker.specs()[0].context_length, 512u) << "0 means the default";
+  EXPECT_EQ(worker.specs()[0].context_length, 0u) << "the backend resolves the default";
   EXPECT_EQ(worker.specs()[0].device, DeviceKind::kCpu);
 
   EXPECT_EQ(response.model().n_layer(), kLayers);
@@ -239,6 +240,7 @@ TEST(WorkerService, LoadsAShardByDigest) {
   EXPECT_TRUE(response.shard().has_embedding());
   EXPECT_FALSE(response.shard().has_head());
   EXPECT_EQ(response.shard().weight_bytes(), 1234u);
+  EXPECT_EQ(response.shard().context_length(), 64u);
   EXPECT_EQ(response.shard().device(), v1::DEVICE_KIND_CPU);
   EXPECT_EQ(response.shard().backend(), "fake-cpu");
 }

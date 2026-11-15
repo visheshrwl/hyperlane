@@ -43,7 +43,9 @@ struct ShardSpec {
   DeviceKind device = DeviceKind::kCpu;
   uint32_t layer_begin = 0;
   uint32_t layer_end = 0;  // exclusive; 0 means through the last layer
-  uint32_t context_length = 512;
+  // Tokens of KV cache per session. 0 means 512, or the model's trained
+  // context when that is smaller.
+  uint32_t context_length = 0;
   uint32_t max_sessions = 8;
   int threads = 4;
 };
@@ -54,6 +56,7 @@ struct ShardInfo {
   bool has_embedding = false;
   bool has_head = false;
   uint64_t weight_bytes = 0;
+  uint32_t context_length = 0;  // as loaded, once the default is resolved
   std::string backend;
 };
 

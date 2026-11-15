@@ -16,7 +16,6 @@ static_assert(std::endian::native == std::endian::little,
               "tensors travel as little-endian float32");
 
 constexpr size_t kMaxSessionIdBytes = 128;
-constexpr uint32_t kDefaultContextLength = 512;
 
 v1::DeviceKind to_proto(DeviceKind kind) {
   switch (kind) {
@@ -149,8 +148,7 @@ grpc::Status WorkerServiceImpl::LoadShard(grpc::ServerContext*,
     spec.model_path = model_path_for_digest(config_.model_dir, request->model_sha256());
     spec.layer_begin = request->layer_begin();
     spec.layer_end = request->layer_end();
-    spec.context_length =
-        request->context_length() == 0 ? kDefaultContextLength : request->context_length();
+    spec.context_length = request->context_length();
     spec.threads = config_.threads;
     spec.max_sessions = config_.max_sessions;
 
@@ -189,6 +187,7 @@ grpc::Status WorkerServiceImpl::LoadShard(grpc::ServerContext*,
     shard_out->set_has_embedding(shard.has_embedding);
     shard_out->set_has_head(shard.has_head);
     shard_out->set_weight_bytes(shard.weight_bytes);
+    shard_out->set_context_length(shard.context_length);
     shard_out->set_device(to_proto(spec.device));
     shard_out->set_backend(shard.backend);
 

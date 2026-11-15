@@ -252,8 +252,19 @@ TEST_F(TinyModelTest, RefusesBadLayerRangesAndContexts) {
   ShardSpec s = spec();
   s.context_length = 65;
   expect_error(ErrorKind::kInvalidArgument, [&] { load_ggml_backend(s); });
+}
+
+TEST_F(TinyModelTest, ContextLengthDefaultsToWhatTheModelCanHold) {
+  ShardSpec s = spec();
   s.context_length = 0;
-  expect_error(ErrorKind::kInvalidArgument, [&] { load_ggml_backend(s); });
+  EXPECT_EQ(load_ggml_backend(s)->shard().context_length, 64u)
+      << "512, cut down to the model's trained context of 64";
+  s.context_length = 10;
+  auto small = load_ggml_backend(s);
+  EXPECT_EQ(small->shard().context_length, 10u);
+  small->open_session("s");
+  expect_error(ErrorKind::kResourceExhausted,
+               [&] { small->forward("s", 0, tokens(std::vector<int32_t>(11, 1))); });
 }
 
 TEST_F(TinyModelTest, RefusesAMissingOrDamagedModel) {
