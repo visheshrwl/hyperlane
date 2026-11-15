@@ -10,13 +10,32 @@ constexpr size_t kMaxTxtEntry = 255;
 
 void add(TxtRecord& txt, const std::string& key, std::string value) {
   size_t room = kMaxTxtEntry - key.size() - 1;
-  if (value.size() > room) {
-    value.resize(room);
-  }
-  txt.emplace_back(key, std::move(value));
+  txt.emplace_back(key, truncate_utf8(std::move(value), room));
 }
 
 }  // namespace
+
+std::string truncate_utf8(std::string value, size_t max_bytes) {
+  if (value.size() <= max_bytes) {
+    return value;
+  }
+  size_t cut = max_bytes;
+  while (cut > 0 && (static_cast<unsigned char>(value[cut]) & 0xC0) == 0x80) {
+    --cut;
+  }
+  value.resize(cut);
+  return value;
+}
+
+std::string instance_name_for(const std::string& worker_id) {
+  return truncate_utf8(worker_id, kMaxInstanceName);
+}
+
+bool advertise_worker(Advertiser& advertiser, const std::string& worker_id,
+                      uint16_t port, const std::vector<DeviceInfo>& devices) {
+  return advertiser.start(instance_name_for(worker_id), port,
+                          build_txt_record(worker_id, devices));
+}
 
 TxtRecord build_txt_record(const std::string& worker_id,
                            const std::vector<DeviceInfo>& devices) {

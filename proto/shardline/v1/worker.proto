@@ -22,8 +22,10 @@ message DeviceInfo {
   // system RAM, which the GPU cannot use in full.
   uint64 total_memory_bytes = 3;
   // Memory the worker may plan to use on this device right now: free VRAM on
-  // CUDA, the Metal recommended working set minus current allocations on
-  // Apple, and available RAM on CPU.
+  // CUDA, available RAM on CPU, and on Apple the lesser of the Metal
+  // recommended working set minus current allocations and available RAM.
+  // On Apple unified memory the Metal and CPU entries draw on the same
+  // memory, so a planner must not add them together.
   uint64 usable_memory_bytes = 4;
 }
 

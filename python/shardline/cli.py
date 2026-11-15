@@ -35,6 +35,7 @@ def _stats(target: str) -> int:
 
 
 def _discover(wait: float) -> int:
+    from shardline.client import first_reachable
     from shardline.discovery import DiscoveryManager
 
     manager = DiscoveryManager()
@@ -49,9 +50,11 @@ def _discover(wait: float) -> int:
         print(f"no workers found in {wait:g} s", file=sys.stderr)
         return 1
     for worker in workers:
+        target = first_reachable(worker.targets)
+        note = "" if target else "  [no announced address answers from here]"
         print(
-            f"{worker.target:<24} {worker.worker_id:<32} {worker.device_kind:<6} "
-            f"{worker.device_name} ({worker.usable_memory_bytes / GIB:.1f} GiB usable)"
+            f"{target or worker.target:<24} {worker.worker_id:<32} {worker.device_kind:<6} "
+            f"{worker.device_name} ({worker.usable_memory_bytes / GIB:.1f} GiB usable){note}"
         )
     return 0
 

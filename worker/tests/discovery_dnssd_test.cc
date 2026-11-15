@@ -49,25 +49,7 @@ bool mdns_required() {
   return value != nullptr && std::string(value) == "1";
 }
 
-// Registers through the system mDNS daemon and resolves the record back, so
-// it needs mDNSResponder (macOS) or avahi-daemon (Linux). It is skipped when
-// no daemon is reachable unless SHARDLINE_REQUIRE_MDNS=1.
-TEST(DnsSdAdvertiser, PublishesOneTxtKeyPerField) {
-  std::random_device random;
-  std::string name = "shardline-test-" + std::to_string(random());
-  std::vector<DeviceInfo> devices = {
-      {DeviceKind::kCuda, "NVIDIA GeForce RTX 3090", 25769803776ull,
-       24000000000ull}};
-
-  auto advertiser = make_mdns_advertiser();
-  ASSERT_NE(advertiser, nullptr);
-  if (!advertiser->start(name, 45678, build_txt_record(name, devices))) {
-    if (mdns_required()) {
-      FAIL() << "mDNS daemon unavailable";
-    }
-    GTEST_SKIP() << "mDNS daemon unavailable";
-  }
-
+Resolved resolve(const std::string& name) {
   Resolved resolved;
   DNSServiceRef ref = nullptr;
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -91,6 +73,29 @@ TEST(DnsSdAdvertiser, PublishesOneTxtKeyPerField) {
   if (ref != nullptr) {
     DNSServiceRefDeallocate(ref);
   }
+  return resolved;
+}
+
+// Registers through the system mDNS daemon and resolves the record back, so
+// it needs mDNSResponder (macOS) or avahi-daemon (Linux). It is skipped when
+// no daemon is reachable unless SHARDLINE_REQUIRE_MDNS=1.
+TEST(DnsSdAdvertiser, PublishesOneTxtKeyPerField) {
+  std::random_device random;
+  std::string name = "shardline-test-" + std::to_string(random());
+  std::vector<DeviceInfo> devices = {
+      {DeviceKind::kCuda, "NVIDIA GeForce RTX 3090", 25769803776ull,
+       24000000000ull}};
+
+  auto advertiser = make_mdns_advertiser();
+  ASSERT_NE(advertiser, nullptr);
+  if (!advertiser->start(name, 45678, build_txt_record(name, devices))) {
+    if (mdns_required()) {
+      FAIL() << "mDNS daemon unavailable";
+    }
+    GTEST_SKIP() << "mDNS daemon unavailable";
+  }
+
+  Resolved resolved = resolve(name);
   advertiser->stop();
 
   ASSERT_TRUE(resolved.done) << "service was not resolved within 10 s";
@@ -101,6 +106,30 @@ TEST(DnsSdAdvertiser, PublishesOneTxtKeyPerField) {
   EXPECT_EQ(resolved.txt["device"], "NVIDIA GeForce RTX 3090");
   EXPECT_EQ(resolved.txt["mem_total"], "25769803776");
   EXPECT_EQ(resolved.txt["mem_usable"], "24000000000");
+}
+
+// A worker id longer than one DNS label used to make DNSServiceRegister fail.
+TEST(DnsSdAdvertiser, RegistersAWorkerIdLongerThanADnsLabel) {
+  std::random_device random;
+  std::string id = "shardline-test-" + std::to_string(random()) + "-" +
+                   std::string(100, 'w');
+  std::vector<DeviceInfo> devices = {{DeviceKind::kCpu, "CPU", 1, 1}};
+
+  auto advertiser = make_mdns_advertiser();
+  ASSERT_NE(advertiser, nullptr);
+  if (!advertise_worker(*advertiser, id, 45679, devices)) {
+    if (mdns_required()) {
+      FAIL() << "mDNS daemon unavailable";
+    }
+    GTEST_SKIP() << "mDNS daemon unavailable";
+  }
+
+  Resolved resolved = resolve(instance_name_for(id));
+  advertiser->stop();
+
+  ASSERT_TRUE(resolved.done) << "service was not resolved within 10 s";
+  EXPECT_EQ(resolved.port, 45679);
+  EXPECT_EQ(resolved.txt["id"], id);
 }
 
 }  // namespace

@@ -17,7 +17,8 @@ void print_usage(std::ostream& out) {
          "  --listen HOST:PORT  address to serve on (default 127.0.0.1:50051;\n"
          "                      port 0 picks a free port)\n"
          "  --advertise         announce the worker over mDNS (non-loopback\n"
-         "                      listeners only)\n"
+         "                      listeners only); exits with an error if the\n"
+         "                      mDNS daemon is unavailable at startup\n"
          "  --worker-id ID      stable identifier (default HOSTNAME-RANDOM)\n"
          "  --version           print the version and exit\n";
 }
