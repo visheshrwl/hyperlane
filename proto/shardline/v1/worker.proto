@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package shardline.v1;
+
+// Control service exposed by every worker.
+service WorkerService {
+  // Reports the worker's identity and the compute devices it can use.
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+}
+
+enum DeviceKind {
+  DEVICE_KIND_UNSPECIFIED = 0;
+  DEVICE_KIND_CPU = 1;
+  DEVICE_KIND_METAL = 2;
+  DEVICE_KIND_CUDA = 3;
+}
+
+message DeviceInfo {
+  DeviceKind kind = 1;
+  string name = 2;
+  // Physical memory attached to the device. For Apple unified memory this is
+  // system RAM, which the GPU cannot use in full.
+  uint64 total_memory_bytes = 3;
+  // Memory the worker may plan to use on this device right now: free VRAM on
+  // CUDA, the Metal recommended working set minus current allocations on
+  // Apple, and available RAM on CPU.
+  uint64 usable_memory_bytes = 4;
+}
+
+message GetStatsRequest {}
+
+message GetStatsResponse {
+  string worker_id = 1;
+  string hostname = 2;
+  // Protocol package the worker implements, for example "shardline.v1".
+  string protocol = 3;
+  string worker_version = 4;
+  repeated DeviceInfo devices = 5;
+}
