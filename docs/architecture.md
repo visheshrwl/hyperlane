@@ -4,7 +4,7 @@ This document grows with the implementation. The backend section below is the re
 
 ## Backend
 
-### Decision (proposed 2026-11-15, awaiting approval)
+### Decision (proposed and approved 2026-11-15)
 
 Each worker runs its layer range with **our own Llama-family stage engine written against ggml's public API** (`ggml.h`, `ggml-backend.h`, `gguf.h`). One GGUF file serves every backend: ggml-CPU, ggml-Metal and ggml-CUDA, with Vulkan possible later. The HF transformers fp32 CPU model is the correctness oracle. MLX and ONNX Runtime are not used.
 
