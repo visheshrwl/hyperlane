@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import itertools
+import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceStateChange, Zeroconf
 
 SERVICE_TYPE = "_shardline._tcp.local."
 TXT_VERSION = "1"
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -27,9 +31,18 @@ class WorkerAdvert:
     usable_memory_bytes: int
 
     @property
+    def targets(self) -> tuple[str, ...]:
+        """Every announced address as a gRPC target, in the order zeroconf reported them."""
+        return tuple(
+            f"[{host}]:{self.port}" if ":" in host else f"{host}:{self.port}"
+            for host in self.addresses
+        )
+
+    @property
     def target(self) -> str:
-        host = self.addresses[0]
-        return f"[{host}]:{self.port}" if ":" in host else f"{host}:{self.port}"
+        """The first announced address. A host with several interfaces announces all of
+        them and this one may not be reachable from here; see client.first_reachable."""
+        return self.targets[0]
 
 
 def _to_int(value: str | None) -> int:
@@ -41,7 +54,7 @@ def _to_int(value: str | None) -> int:
 
 def parse_service_info(info: ServiceInfo) -> WorkerAdvert | None:
     properties = {
-        key.decode(): (value.decode() if value is not None else "")
+        key.decode(errors="replace"): (value.decode(errors="replace") if value is not None else "")
         for key, value in (info.properties or {}).items()
     }
     if properties.get("txtvers") != TXT_VERSION:
@@ -72,6 +85,8 @@ class DiscoveryManager:
         self._executor = None
         self._lock = threading.Lock()
         self._workers: dict[str, WorkerAdvert] = {}
+        self._events = itertools.count(1)
+        self._latest_event: dict[str, int] = {}
 
     def start(self) -> None:
         self._zeroconf = self._zeroconf_factory()
@@ -92,16 +107,28 @@ class DiscoveryManager:
             return sorted(self._workers.values(), key=lambda worker: worker.name)
 
     def _on_change(self, zeroconf, service_type, name, state_change) -> None:
-        if state_change is ServiceStateChange.Removed:
-            with self._lock:
+        # The newest event for a name wins. A resolve that finishes after a later
+        # event for the same name is stale and must not store its result.
+        with self._lock:
+            if state_change is ServiceStateChange.Removed:
+                self._latest_event.pop(name, None)
                 self._workers.pop(name, None)
-            return
+                return
+            event = self._latest_event[name] = next(self._events)
         # Resolving blocks, so it must not run on the browser thread.
-        self._executor.submit(self._resolve, zeroconf, service_type, name)
+        future = self._executor.submit(self._resolve, zeroconf, service_type, name, event)
+        future.add_done_callback(lambda done: self._log_failure(name, done))
 
-    def _resolve(self, zeroconf, service_type, name) -> None:
+    def _resolve(self, zeroconf, service_type, name, event) -> None:
         info = zeroconf.get_service_info(service_type, name, timeout=3000)
         advert = parse_service_info(info) if info is not None else None
-        if advert is not None:
-            with self._lock:
+        if advert is None:
+            return
+        with self._lock:
+            if self._latest_event.get(name) == event:
                 self._workers[name] = advert
+
+    @staticmethod
+    def _log_failure(name: str, future: Future) -> None:
+        if not future.cancelled() and future.exception() is not None:
+            logger.warning("could not resolve %s", name, exc_info=future.exception())

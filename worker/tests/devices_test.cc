@@ -35,6 +35,36 @@ TEST(Devices, AcceleratorMemoryIsConsistent) {
   }
 }
 
+TEST(Devices, HostAvailableMemoryIsPlausible) {
+  uint64_t available = host_available_memory();
+  EXPECT_GT(available, 0u);
+  EXPECT_LE(available, probe_cpu().total_memory_bytes);
+}
+
+constexpr uint64_t kGiB = 1ull << 30;
+
+TEST(MetalUsableMemory, UnifiedMemoryIsCappedByHostAvailableMemory) {
+  EXPECT_EQ(metal_usable_memory(12 * kGiB, 1 * kGiB, 6 * kGiB, true), 6 * kGiB);
+}
+
+TEST(MetalUsableMemory, WorkingSetHeadroomWinsWhenItIsTheSmallerLimit) {
+  EXPECT_EQ(metal_usable_memory(12 * kGiB, 1 * kGiB, 20 * kGiB, true),
+            11 * kGiB);
+}
+
+TEST(MetalUsableMemory, DiscreteMemoryIgnoresHostMemory) {
+  EXPECT_EQ(metal_usable_memory(12 * kGiB, 1 * kGiB, 6 * kGiB, false),
+            11 * kGiB);
+}
+
+TEST(MetalUsableMemory, UnknownHostMemoryLeavesTheHeadroom) {
+  EXPECT_EQ(metal_usable_memory(12 * kGiB, 1 * kGiB, 0, true), 11 * kGiB);
+}
+
+TEST(MetalUsableMemory, OverAllocationLeavesNothing) {
+  EXPECT_EQ(metal_usable_memory(12 * kGiB, 13 * kGiB, 20 * kGiB, true), 0u);
+}
+
 #if defined(__APPLE__)
 // Hosted CI runners are virtual machines and may expose no Metal device, so
 // the device is only required when SHARDLINE_EXPECT_METAL=1.

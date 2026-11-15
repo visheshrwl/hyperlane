@@ -12,12 +12,12 @@ Pipeline parallelism adds capacity, not single-stream speed: one request keeps o
 
 | Area | State |
 |---|---|
-| Worker (`worker/`, C++20) | Builds CPU-only on macOS (arm64) and Linux. Serves `shardline.v1.WorkerService/GetStats` over gRPC, reporting host RAM, the Metal working-set limit on Apple Silicon and, when built with `SHARDLINE_CUDA=ON`, CUDA free/total memory. Binds `127.0.0.1` by default; there is no authentication yet |
-| Discovery | Workers advertise `_shardline._tcp` over mDNS (`--advertise`, non-loopback listeners only) using the dns_sd API: native on macOS, Avahi's compat library on Linux |
-| Python package (`python/shardline`) | gRPC client and `shardline stats` / `shardline discover` CLI. Pure Python; torch is only in the `oracle` extra |
+| Worker (`worker/`, C++20) | Builds CPU-only on macOS (arm64) and Linux. Serves `shardline.v1.WorkerService/GetStats` over gRPC, reporting host RAM, the Metal working-set limit on Apple Silicon (capped by the RAM that is available, since Metal and the CPU share it) and, when built with `SHARDLINE_CUDA=ON`, CUDA free/total memory. Binds `127.0.0.1` by default; there is no authentication yet |
+| Discovery | Workers advertise `_shardline._tcp` over mDNS (`--advertise`, non-loopback listeners only) using the dns_sd API: native on macOS, Avahi's compat library on Linux. A worker that cannot register exits with an error, and one that loses the mDNS daemon registers again when it returns |
+| Python package (`python/shardline`) | gRPC client and `shardline stats` / `shardline discover` CLI; `discover` prints the first announced address that answers from the machine it runs on. Pure Python; torch is only in the `oracle` extra |
 | Layer planner | The current partitioner assigns layers **non-contiguously**, which is invalid for a pipeline (recorded as a strict xfail test). A contiguous, throughput-aware planner replaces it |
 | Model execution, activation transport, OpenAI API | Not implemented. The planned engine is ggml, with gRPC streaming between stages |
-| CUDA | The device probe compiles in CI (`nvidia/cuda` container). Not yet run on an NVIDIA GPU |
+| CUDA | The device probe is built by the `worker-cuda` CI job (`nvidia/cuda` container). It has run on one NVIDIA GPU, an RTX 3050 Laptop, and reported 3.6 of 3.7 GiB free, matching `nvidia-smi` |
 
 ## Build
 

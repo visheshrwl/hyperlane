@@ -48,8 +48,9 @@ uint64_t total_ram() {
   return bytes;
 }
 
-// macOS has no "available memory" counter; free + inactive + speculative
-// pages is the usual approximation.
+// macOS has no "available memory" counter; free + inactive pages is the usual
+// approximation. free_count already includes the speculative pages (vm_stat
+// prints free_count - speculative_count), so they must not be added again.
 uint64_t available_ram() {
   vm_statistics64_data_t stats{};
   mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
@@ -60,8 +61,7 @@ uint64_t available_ram() {
   }
   vm_size_t page_size = 0;
   host_page_size(mach_host_self(), &page_size);
-  uint64_t pages = static_cast<uint64_t>(stats.free_count) +
-                   stats.inactive_count + stats.speculative_count;
+  uint64_t pages = static_cast<uint64_t>(stats.free_count) + stats.inactive_count;
   return pages * page_size;
 }
 
@@ -109,6 +109,17 @@ uint64_t available_ram() { return meminfo_bytes("MemAvailable"); }
 #endif
 
 }  // namespace
+
+uint64_t host_available_memory() { return available_ram(); }
+
+uint64_t metal_usable_memory(uint64_t working_set, uint64_t allocated,
+                             uint64_t host_available, bool unified_memory) {
+  uint64_t headroom = working_set > allocated ? working_set - allocated : 0;
+  if (unified_memory && host_available != 0) {
+    return std::min(headroom, host_available);
+  }
+  return headroom;
+}
 
 DeviceInfo probe_cpu() {
   DeviceInfo info;

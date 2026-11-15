@@ -1,9 +1,11 @@
 """Runs the real worker binary. Set SHARDLINE_WORKER_BIN to its path."""
 
 import os
+import queue
 import re
 import signal
 import subprocess
+import threading
 
 import pytest
 
@@ -16,6 +18,19 @@ WORKER_BIN = os.environ.get("SHARDLINE_WORKER_BIN")
 pytestmark = pytest.mark.skipif(not WORKER_BIN, reason="SHARDLINE_WORKER_BIN is not set")
 
 
+STARTUP_TIMEOUT = 20
+
+
+def first_line(stream, timeout):
+    """The next line from stream, or None if none arrives within timeout seconds."""
+    lines = queue.Queue()
+    threading.Thread(target=lambda: lines.put(stream.readline()), daemon=True).start()
+    try:
+        return lines.get(timeout=timeout)
+    except queue.Empty:
+        return None
+
+
 @pytest.fixture
 def worker():
     process = subprocess.Popen(
@@ -24,12 +39,15 @@ def worker():
         stderr=subprocess.PIPE,
         text=True,
     )
-    line = process.stdout.readline()
-    match = re.search(r"listening on (\S+)", line)
-    assert match, f"unexpected worker output: {line!r}"
-    yield process, match.group(1)
-    if process.poll() is None:
-        process.kill()
+    try:
+        line = first_line(process.stdout, STARTUP_TIMEOUT)
+        assert line is not None, f"the worker printed nothing in {STARTUP_TIMEOUT} s"
+        match = re.search(r"listening on (\S+)", line)
+        assert match, f"unexpected worker output: {line!r}"
+        yield process, match.group(1)
+    finally:
+        if process.poll() is None:
+            process.kill()
         process.wait()
 
 

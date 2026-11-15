@@ -84,10 +84,16 @@ bool WorkerNode::start() {
       std::cerr << "mDNS: not advertising a loopback-only listener\n";
     } else if (!(advertiser_ = make_mdns_advertiser())) {
       std::cerr << "mDNS: this build has no mDNS support\n";
-    } else if (!advertiser_->start(worker_id_, static_cast<uint16_t>(port_),
-                                   build_txt_record(worker_id_,
-                                                    probe_devices()))) {
+    } else if (!advertise_worker(*advertiser_, worker_id_,
+                                 static_cast<uint16_t>(port_),
+                                 probe_devices())) {
+      std::cerr << "mDNS: cannot advertise, and --advertise was given\n";
       advertiser_.reset();
+      server_->Shutdown();
+      server_.reset();
+      service_.reset();
+      port_ = 0;
+      return false;
     }
   }
   return true;

@@ -23,7 +23,8 @@ std::vector<DeviceInfo> probe_metal() {
     info.kind = DeviceKind::kMetal;
     info.name = device.name.UTF8String;
     info.total_memory_bytes = device.hasUnifiedMemory ? ram : working_set;
-    info.usable_memory_bytes = working_set > allocated ? working_set - allocated : 0;
+    info.usable_memory_bytes = metal_usable_memory(
+        working_set, allocated, host_available_memory(), device.hasUnifiedMemory);
     return {info};
   }
 }
